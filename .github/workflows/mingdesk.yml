@@ -43,6 +43,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: x86_64-unknown-linux-gnu
+          components: rustfmt
 
       - uses: subosito/flutter-action@v2
         with:
