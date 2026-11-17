@@ -8,6 +8,7 @@ on:
 
 env:
   MAC_RUST_VERSION: "1.81"
+  FLUTTER_VERSION: "3.24.5"
   FLUTTER_MACOS_ARM_VERSION: "3.44.9"
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
@@ -17,8 +18,14 @@ env:
 
 jobs:
   bridge:
-    name: bridge (3.44.8)
+    name: bridge (${{ matrix.flutter }})
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { flutter: "3.22.3", artifact: "bridge-artifact" }
+          - { flutter: "3.44.8", artifact: "bridge-artifact-flutter-3.44" }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,7 +46,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: "3.44.8"
+          flutter-version: ${{ matrix.flutter }}
           cache: true
 
       - name: Install flutter rust bridge deps
@@ -47,7 +54,11 @@ jobs:
         run: |
           cargo install cargo-expand --version ${{ env.CARGO_EXPAND_VERSION }} --locked
           cargo install flutter_rust_bridge_codegen --version ${{ env.FLUTTER_RUST_BRIDGE_VERSION }} --features "uuid" --locked
-          bash .github/patches/apply_flutter_3.44_source_patches.sh
+          if [[ "${{ matrix.flutter }}" == "3.22.3" ]]; then
+            sed -i -e 's/extended_text: 14.0.0/extended_text: 13.0.0/g' flutter/pubspec.yaml
+          else
+            bash .github/patches/apply_flutter_3.44_source_patches.sh
+          fi
           pushd flutter && flutter pub get && popd
 
       - name: Run flutter rust bridge
@@ -59,7 +70,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: bridge-artifact-flutter-3.44
+          name: ${{ matrix.artifact }}
           path: |
             ./src/bridge_generated.rs
             ./src/bridge_generated.io.rs
@@ -69,13 +80,34 @@ jobs:
             ./flutter/ios/Runner/bridge_generated.h
 
   build:
-    name: macOS arm64
-    # Probed on this fork: macos-13 and macos-14 are never acquired,
-    # macos-26 gets cancelled for capacity. macos-15 is the only label that
-    # reliably allocates an arm64 hosted runner.
-    runs-on: macos-15
+    name: macOS ${{ matrix.arch }}
     needs: [bridge]
+    # Probed on this fork: macos-13/macos-14 are never acquired, macos-26 is
+    # cancelled for capacity. macos-15 (arm64) and macos-15-intel (x86_64) are
+    # the only labels that allocate, and even those are best-effort, so this is
+    # a matrix with fail-fast disabled: the x86_64 slice (runs on Apple Silicon
+    # via Rosetta) is the guaranteed deliverable.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            flutter: "3.24.5"
+            bridge: bridge-artifact
+            extra: ""
+            triplet: x64-osx
+          - arch: arm64
+            os: macos-15
+            target: aarch64-apple-darwin
+            flutter: "3.44.9"
+            bridge: bridge-artifact-flutter-3.44
+            extra: "--screencapturekit"
+            triplet: arm64-osx
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 240
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,7 +115,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: bridge-artifact-flutter-3.44
+          name: ${{ matrix.bridge }}
           path: ./
 
       - name: Install build runtime
@@ -101,12 +133,14 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: ${{ env.FLUTTER_MACOS_ARM_VERSION }}
+          flutter-version: ${{ matrix.flutter }}
 
       - name: Configure flutter
+        if: ${{ matrix.arch == 'arm64' }}
         run: flutter config --no-enable-swift-package-manager
 
       - name: Patch RustDesk sources for Flutter 3.44
+        if: ${{ matrix.arch == 'arm64' }}
         shell: bash
         run: |
           export PATH="$(brew --prefix gnu-sed)/libexec/gnubin:$PATH"
@@ -115,12 +149,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.MAC_RUST_VERSION }}
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
           components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: macos-arm64
+          prefix-key: macos-${{ matrix.arch }}
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
@@ -128,27 +162,31 @@ jobs:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
       - name: Install vcpkg dependencies
-        run: $VCPKG_ROOT/vcpkg install --x-install-root="$VCPKG_ROOT/installed"
+        shell: bash
+        env:
+          VCPKG_DEFAULT_TRIPLET: ${{ matrix.triplet }}
+        run: $VCPKG_ROOT/vcpkg install --triplet ${{ matrix.triplet }} --x-install-root="$VCPKG_ROOT/installed"
 
       - name: Build MingDesk
         shell: bash
         run: |
           set -euo pipefail
           MIN_MACOS_VERSION="12.3"
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then MIN_MACOS_VERSION="10.15"; fi
           sed -i '' -e "s/MACOSX_DEPLOYMENT_TARGET=[0-9]*\.[0-9]*/MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}/" build.py
           sed -i '' -e "s/platform :osx, '.*'/platform :osx, '${MIN_MACOS_VERSION}'/" flutter/macos/Podfile
           sed -i '' -e "s/osx_minimum_system_version = \"[0-9]*\.[0-9]*\"/osx_minimum_system_version = \"${MIN_MACOS_VERSION}\"/" Cargo.toml
           sed -i '' -e "s/MACOSX_DEPLOYMENT_TARGET = [0-9]*\.[0-9]*;/MACOSX_DEPLOYMENT_TARGET = ${MIN_MACOS_VERSION};/" flutter/macos/Runner.xcodeproj/project.pbxproj
-          ./build.py --flutter --hwcodec --unix-file-copy-paste --screencapturekit
+          ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.extra }}
 
       - name: Package app
         run: |
           cd flutter/build/macos/Build/Products/Release
           ls -la
-          ditto -c -k --sequesterRsrc --keepParent MingDesk.app "$GITHUB_WORKSPACE/MingDesk-macos-arm64.zip"
-          du -sh "$GITHUB_WORKSPACE/MingDesk-macos-arm64.zip"
+          ditto -c -k --sequesterRsrc --keepParent MingDesk.app "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.zip"
+          du -sh "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MingDesk-macos-arm64
-          path: MingDesk-macos-arm64.zip
+          name: MingDesk-macos-${{ matrix.arch }}
+          path: MingDesk-macos-${{ matrix.arch }}.zip
