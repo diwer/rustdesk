@@ -1,8 +1,0 @@
-name: TestCallBridge
-on:
-  push:
-    tags:
-      - 'tc3-*'
-jobs:
-  x:
-    uses: ./.github/workflows/bridge.yml
