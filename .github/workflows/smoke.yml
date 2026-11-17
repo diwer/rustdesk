@@ -1,0 +1,10 @@
+name: Smoke
+on:
+  push:
+    tags:
+      - 'smoke-*'
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "actions work"
