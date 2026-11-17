@@ -70,9 +70,12 @@ jobs:
 
   build:
     name: macOS arm64
-    runs-on: macos-26
+    # macos-26 (arm64) frequently reports "job was not acquired by Runner"
+    # on public repos; macos-14 image is the same arm64 hardware and is
+    # better provisioned. Fall back to it and retry the queue a few times.
+    runs-on: macos-14
     needs: [bridge]
-    timeout-minutes: 180
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
         with:
