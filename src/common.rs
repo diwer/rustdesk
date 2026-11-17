@@ -1067,6 +1067,10 @@ pub fn is_modifier(evt: &KeyEvent) -> bool {
 }
 
 pub fn check_software_update() {
+    // MingDesk: software update checking is removed from this build, so never
+    // contact api.rustdesk.com.
+    return;
+    #[allow(unreachable_code)]
     if is_custom_client() {
         return;
     }

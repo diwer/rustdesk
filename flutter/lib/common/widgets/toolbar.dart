@@ -612,7 +612,9 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
     );
   }
   // note
-  if (isDefaultConn && !bind.isDisableAccount()) {
+  if (isDefaultConn &&
+      !bind.isDisableAccount() &&
+      bind.mainGetLocalOption(key: 'access_token').isNotEmpty) {
     v.add(
       TTextMenu(
           child: Text(translate('Note')),
