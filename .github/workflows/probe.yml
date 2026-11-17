@@ -1,0 +1,19 @@
+name: Probe macOS runners
+on:
+  push:
+    tags:
+      - 'probe-*'
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-14, macos-15, macos-15-intel, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - run: |
+          echo "runner=${{ matrix.os }}"
+          uname -a
+          sw_vers || true
