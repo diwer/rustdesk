@@ -70,10 +70,10 @@ jobs:
 
   build:
     name: macOS arm64
-    # macos-26 (arm64) frequently reports "job was not acquired by Runner"
-    # on public repos; macos-14 image is the same arm64 hardware and is
-    # better provisioned. Fall back to it and retry the queue a few times.
-    runs-on: macos-14
+    # Probed on this fork: macos-13 and macos-14 are never acquired,
+    # macos-26 gets cancelled for capacity. macos-15 is the only label that
+    # reliably allocates an arm64 hosted runner.
+    runs-on: macos-15
     needs: [bridge]
     timeout-minutes: 240
     steps:
