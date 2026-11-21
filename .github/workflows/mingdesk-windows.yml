@@ -142,19 +142,27 @@ jobs:
           $VCPKG_ROOT/vcpkg install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed"
 
       - name: Build MingDesk
-        run: python .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+        # No --skip-portable-pack: that flag is what turns the output into the
+        # self-extracting *-install.exe. Without it build.py runs
+        # libs/portable/generate.py, compresses the Flutter bundle into the packer
+        # and emits MingDesk-<version>-install.exe.
+        run: python .\build.py --portable --flutter --hwcodec --vram
 
       - name: Package
         shell: pwsh
         run: |
+          $installer = Get-ChildItem -Filter "*-install.exe" | Select-Object -First 1
+          if (-not $installer) { throw "installer not produced" }
+          Write-Host "Installer: $($installer.Name)"
+          "{0:N1} MB" -f ($installer.Length / 1MB)
+          Copy-Item $installer.FullName "MingDesk-windows-x64-installer.exe"
+          # Keep the portable bundle too, so the user can pick either form.
           $rel = "flutter/build/windows/x64/runner/Release"
-          if (Test-Path "rustdesk") { $rel = "rustdesk" }
-          Write-Host "Packaging from $rel"
-          Get-ChildItem $rel | Select-Object -ExpandProperty Name
-          Compress-Archive -Path "$rel/*" -DestinationPath "MingDesk-windows-x64.zip" -Force
-          "{0:N1} MB" -f ((Get-Item MingDesk-windows-x64.zip).Length / 1MB)
+          Compress-Archive -Path "$rel/*" -DestinationPath "MingDesk-windows-x64-portable.zip" -Force
 
       - uses: actions/upload-artifact@v4
         with:
           name: MingDesk-windows-x64
-          path: MingDesk-windows-x64.zip
+          path: |
+            MingDesk-windows-x64-installer.exe
+            MingDesk-windows-x64-portable.zip

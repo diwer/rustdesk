@@ -23,6 +23,10 @@ REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 windows = platform.platform().startswith('Windows')
 osx = platform.platform().startswith(
     'Darwin') or platform.platform().startswith("macOS")
+# White-label names: the app executable inside the Flutter bundle and the
+# self-extracting installer's file name stem.
+app_exe_name = os.environ.get('MINGDESK_APP_EXE', 'MingDesk.exe')
+installer_stem = os.environ.get('MINGDESK_INSTALLER_STEM', 'MingDesk')
 hbb_name = 'rustdesk' + ('.exe' if windows else '')
 exe_path = 'target/release/' + hbb_name
 if windows:
@@ -981,20 +985,17 @@ def build_flutter_windows(version, features, skip_portable_pack):
         return
     os.chdir('libs/portable')
     system2('pip3 install -r requirements.txt')
+    # The app executable inside the bundle is named BINARY_NAME in
+    # flutter/windows/CMakeLists.txt (MingDesk.exe for this build, not rustdesk.exe).
     system2(
-        f'python3 ./generate.py -f ../../{flutter_build_dir_2} -o . -e ../../{flutter_build_dir_2}/rustdesk.exe')
+        f'python3 ./generate.py -f ../../{flutter_build_dir_2} -o . -e ../../{flutter_build_dir_2}/{app_exe_name}')
     os.chdir('../..')
-    if os.path.exists('./rustdesk_portable.exe'):
-        os.replace('./target/release/rustdesk-portable-packer.exe',
-                   './rustdesk_portable.exe')
-    else:
-        os.rename('./target/release/rustdesk-portable-packer.exe',
-                  './rustdesk_portable.exe')
-    print(
-        f'output location: {os.path.abspath(os.curdir)}/rustdesk_portable.exe')
-    os.rename('./rustdesk_portable.exe', f'./rustdesk-{version}-install.exe')
-    print(
-        f'output location: {os.path.abspath(os.curdir)}/rustdesk-{version}-install.exe')
+    src = './target/release/rustdesk-portable-packer.exe'
+    dst = f'./{installer_stem}-{version}-install.exe'
+    if os.path.exists(dst):
+        os.remove(dst)
+    os.replace(src, dst)
+    print(f'output location: {os.path.abspath(os.curdir)}/{os.path.basename(dst)}')
 
 
 def main():
