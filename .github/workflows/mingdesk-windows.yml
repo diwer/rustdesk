@@ -156,7 +156,12 @@ jobs:
           if (-not $installer) { throw "installer not produced" }
           Write-Host "Installer: $($installer.Name)"
           "{0:N1} MB" -f ($installer.Length / 1MB)
-          Copy-Item $installer.FullName "MingDesk-windows-x64-installer.exe"
+          # Keep the name ENDING IN "install.exe": libs/portable/src/main.rs decides
+          # between "install me" and "run the app" with
+          #   click_setup = args.is_empty() && exe_path.ends_with("install.exe")
+          # so renaming to "-installer.exe" makes it skip installation and just
+          # launch the tool (it even lacks an extraction dir, so nothing happens).
+          Copy-Item $installer.FullName "MingDesk-windows-x64-install.exe"
           # Keep the portable bundle too, so the user can pick either form.
           $rel = "flutter/build/windows/x64/runner/Release"
           Compress-Archive -Path "$rel/*" -DestinationPath "MingDesk-windows-x64-portable.zip" -Force
@@ -211,6 +216,6 @@ jobs:
         with:
           name: MingDesk-windows-x64
           path: |
-            MingDesk-windows-x64-installer.exe
+            MingDesk-windows-x64-install.exe
             MingDesk-windows-x64.msi
             MingDesk-windows-x64-portable.zip
