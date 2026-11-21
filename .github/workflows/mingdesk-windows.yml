@@ -14,6 +14,7 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   CARGO_EXPAND_VERSION: "1.0.95"
   FLUTTER_RUST_BRIDGE_VERSION: "1.80.1"
+  VERSION: "1.5.3"
 
 jobs:
   bridge:
@@ -185,8 +186,18 @@ jobs:
         shell: pwsh
         run: |
           pushd ./res/msi
+          # preprocess.py fills Includes.wxi's <!--$PreVarsStart$--> block with
+          # $(var.Product)/$(var.Version)/... Without those definitions WiX fails
+          # with 65 "Undefined preprocessor variable" errors, so treat any
+          # preprocess failure as fatal and verify the variables landed.
           python preprocess.py --arp -d ../../rustdesk --app-name MingDesk `
-            --version ${{ env.VERSION }} --manufacturer "MingDesk"
+            --manufacturer "MingDesk"
+          if ($LASTEXITCODE -ne 0) { throw "preprocess.py failed ($LASTEXITCODE)" }
+          $vars = Get-Content ./Package/Includes.wxi -Raw
+          if ($vars -notmatch 'define Product="MingDesk"') {
+            Write-Host $vars
+            throw "Includes.wxi was not populated with the product variables"
+          }
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
           $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
