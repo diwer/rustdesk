@@ -53,6 +53,16 @@ pub type NotifyMessageBox = fn(String, String, String, String) -> dyn Future<Out
 // the executable name of the portable version
 pub const PORTABLE_APPNAME_RUNTIME_ENV_KEY: &str = "RUSTDESK_APPNAME";
 
+/// Rendezvous/relay server baked into this build.
+///
+/// This build ships pointing at a private server, so a freshly installed client
+/// is usable without the user touching Settings > Network: `global_init` seeds
+/// the `custom-rendezvous-server` and `relay-server` options from these before
+/// anything can read them. Empty string means "use the public network" and
+/// restores the stock behaviour.
+pub const BAKED_RENDEZVOUS_SERVER: &str = "192.168.3.130";
+pub const BAKED_RELAY_SERVER: &str = "192.168.3.130";
+
 pub const PLATFORM_WINDOWS: &str = "Windows";
 pub const PLATFORM_LINUX: &str = "Linux";
 pub const PLATFORM_MACOS: &str = "Mac OS";
@@ -130,6 +140,7 @@ pub fn init_sodium() {
 
 pub fn global_init() -> bool {
     init_sodium();
+    seed_baked_in_server();
     #[cfg(all(target_os = "linux", feature = "drm"))]
     crate::platform::linux::dispatch_wayland_display_probe();
     #[cfg(target_os = "linux")]
@@ -139,6 +150,31 @@ pub fn global_init() -> bool {
         }
     }
     true
+}
+
+/// Point a fresh install at the server compiled into this build.
+///
+/// Written as a *default* (`DEFAULT_SETTINGS`) rather than a saved option, so it
+/// does not overwrite a server the user deliberately configured afterwards: the
+/// lookup order is OVERWRITE -> saved options -> DEFAULT, and only the last one
+/// is seeded here. Runs before the server processes start, so the first
+/// registration already uses it.
+fn seed_baked_in_server() {
+    if BAKED_RENDEZVOUS_SERVER.is_empty() && BAKED_RELAY_SERVER.is_empty() {
+        return;
+    }
+    let mut defaults = config::DEFAULT_SETTINGS.write().unwrap();
+    for (key, value) in [
+        ("custom-rendezvous-server", BAKED_RENDEZVOUS_SERVER),
+        ("relay-server", BAKED_RELAY_SERVER),
+    ] {
+        if value.is_empty() {
+            continue;
+        }
+        defaults
+            .entry(key.to_owned())
+            .or_insert_with(|| value.to_owned());
+    }
 }
 
 pub fn global_clean() {}
