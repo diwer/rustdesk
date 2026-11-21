@@ -194,7 +194,7 @@ jobs:
           set -euo pipefail
           # build.py leaves the image at the repo root (it moves it out of
           # flutter/../), so look there first and in the release dir second.
-          dmg=$(ls ./*.dmg flutter/build/macos/Build/Products/Release/*.dmg 2>/dev/null | head -1 || true)
+          dmg=$(ls ./*.dmg 2>/dev/null | head -1 || true)
           if [ -n "$dmg" ]; then
             cp "$dmg" "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.dmg"
             du -sh "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.dmg"

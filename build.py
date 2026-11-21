@@ -966,7 +966,12 @@ def build_flutter_dmg(version, features):
         # mounted volume, not a path: passing "build/macos/.../MingDesk.app"
         # makes its Finder AppleScript address a nonexistent item and die with
         # 'Finder got an error: Can't set item ... (-10006)'. The volume is
-        # built from the release dir, so the app is simply "MingDesk.app".
+        # built from the .app itself, so the item inside it is "MingDesk.app".
+        #
+        # The source MUST be the .app, not its release directory: create-dmg
+        # copies the whole source folder, so pointing it at the release dir put
+        # the app's 20+ sibling *.framework and *.dSYM build products in the
+        # image, and the user opened a dmg full of debris.
         # The AppleScript beautification also needs a GUI session, which a CI
         # runner may lack, so it is allowed to fail: create-dmg keeps the image
         # it already produced and only the icon layout is lost.
@@ -976,13 +981,13 @@ def build_flutter_dmg(version, features):
             f'--window-pos 200 120 --window-size 800 400 --icon-size 100 '
             f'--app-drop-link 600 185 --icon "{app_name}.app" 200 190 '
             f'--hide-extension "{app_name}.app" '
-            f'"{dmg_name}.dmg" "{release_dir}" || true')
+            f'"{dmg_name}.dmg" "{app_path}" || true')
         # create-dmg may leave the image behind without renaming it to our
         # requested name (and it prints a random rw.*.dmg while working), so
         # fall back to whatever image it actually left in the release dir.
         if not os.path.exists(f'{dmg_name}.dmg'):
             import glob as _glob
-            leftovers = sorted(_glob.glob(os.path.join(release_dir, '*.dmg')))
+            leftovers = sorted(_glob.glob('*.dmg') + _glob.glob('rw.*.dmg'))
             if leftovers:
                 os.replace(leftovers[-1], f'{dmg_name}.dmg')
                 print(f'create-dmg left {leftovers[-1]}, adopted it')
