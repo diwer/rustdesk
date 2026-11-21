@@ -148,7 +148,7 @@ jobs:
         # and emits MingDesk-<version>-install.exe.
         run: python .\build.py --portable --flutter --hwcodec --vram
 
-      - name: Package
+      - name: Package installer and portable
         shell: pwsh
         run: |
           $installer = Get-ChildItem -Filter "*-install.exe" | Select-Object -First 1
@@ -160,9 +160,46 @@ jobs:
           $rel = "flutter/build/windows/x64/runner/Release"
           Compress-Archive -Path "$rel/*" -DestinationPath "MingDesk-windows-x64-portable.zip" -Force
 
+      - name: Prepare MSI dist directory
+        # preprocess.py reads <app-name>.exe and expects the Flutter bundle laid out
+        # under a directory it is told about. The bundle already contains
+        # MingDesk.exe (BINARY_NAME in flutter/windows/CMakeLists.txt), which is
+        # exactly the name --app-name MingDesk makes it look for. usbmmidd and the
+        # printer driver are optional payload the stock MSI installs; skipped here
+        # since this build has no printer-driver integration.
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .\rustdesk | Out-Null
+          Copy-Item -Recurse -Force flutter\build\windows\x64\runner\Release\* .\rustdesk\
+          Get-ChildItem .\rustdesk | Select-Object -ExpandProperty Name | Write-Host
+          Test-Path .\rustdesk\MingDesk.exe
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x86
+
+      - name: Build MSI
+        # preprocess.py rewrites res/msi in place (license, language tables,
+        # component GUIDs, build vars), so this must run after the portable pack.
+        shell: pwsh
+        run: |
+          pushd ./res/msi
+          python preprocess.py --arp -d ../../rustdesk --app-name MingDesk `
+            --version ${{ env.VERSION }} --manufacturer "MingDesk"
+          nuget restore msi.sln
+          msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
+          $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
+          if (-not $msi) { throw "Package.msi not found" }
+          Write-Host "MSI: $($msi.FullName)"
+          "{0:N1} MB" -f ($msi.Length / 1MB)
+          Copy-Item $msi.FullName "$env:GITHUB_WORKSPACE\MingDesk-windows-x64.msi"
+          popd
+
       - uses: actions/upload-artifact@v4
         with:
           name: MingDesk-windows-x64
           path: |
             MingDesk-windows-x64-installer.exe
+            MingDesk-windows-x64.msi
             MingDesk-windows-x64-portable.zip

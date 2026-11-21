@@ -169,6 +169,8 @@ jobs:
 
       - name: Build MingDesk
         shell: bash
+        env:
+          MINGDESK_MAKE_DMG: "1"
         run: |
           set -euo pipefail
           MIN_MACOS_VERSION="12.3"
@@ -179,28 +181,32 @@ jobs:
           sed -i '' -e "s/MACOSX_DEPLOYMENT_TARGET = [0-9]*\.[0-9]*;/MACOSX_DEPLOYMENT_TARGET = ${MIN_MACOS_VERSION};/" flutter/macos/Runner.xcodeproj/project.pbxproj
           ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.extra }}
 
-      - name: Ad-hoc sign the app
-        # Without a real signing identity, `flutter build` produces an app whose
-        # embedded FlutterMacOS.framework carries a different Team ID than the
-        # main binary, so dyld refuses to map it and the app cannot start at all
-        # ("code signature ... not valid for use in process"). Re-signing the
-        # whole bundle ad-hoc with a single identity fixes the mismatch on any
-        # machine, and Gatekeeper accepts an ad-hoc signed bundle the same as an
-        # unsigned one, so the user only has to clear the quarantine attribute.
+      - name: Verify app
+        # build.py already ad-hoc signs and verifies; this is the belt-and-braces
+        # check that the bundle the user downloads actually starts.
         run: |
           cd flutter/build/macos/Build/Products/Release
-          codesign --force --deep --sign - MingDesk.app
           codesign --verify --deep --strict --verbose=2 MingDesk.app
           MingDesk.app/Contents/MacOS/MingDesk --version
 
-      - name: Package app
+      - name: Collect artifacts
         run: |
-          cd flutter/build/macos/Build/Products/Release
+          set -euo pipefail
           ls -la
+          dmg=$(ls ./*.dmg 2>/dev/null | head -1 || true)
+          if [ -n "$dmg" ]; then
+            cp "$dmg" "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.dmg"
+            du -sh "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.dmg"
+          else
+            echo "WARNING: no dmg produced"
+          fi
+          cd flutter/build/macos/Build/Products/Release
           ditto -c -k --sequesterRsrc --keepParent MingDesk.app "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.zip"
           du -sh "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
           name: MingDesk-macos-${{ matrix.arch }}
-          path: MingDesk-macos-${{ matrix.arch }}.zip
+          path: |
+            MingDesk-macos-${{ matrix.arch }}.dmg
+            MingDesk-macos-${{ matrix.arch }}.zip

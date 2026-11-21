@@ -950,12 +950,29 @@ def build_flutter_dmg(version, features):
     mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x86_64'
     system2(
         f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES flutter build macos --release')
-    system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/MingDesk.app/Contents/MacOS/')
-    '''
-    system2(
-        "create-dmg --volname \"RustDesk Installer\" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 --icon RustDesk.app 200 190 --hide-extension RustDesk.app rustdesk.dmg ./build/macos/Build/Products/Release/RustDesk.app")
-    os.rename("rustdesk.dmg", f"../rustdesk-{version}.dmg")
-    '''
+    app_path = './build/macos/Build/Products/Release/MingDesk.app'
+    system2(f'cp -rf ../target/release/service {app_path}/Contents/MacOS/')
+    # Ad-hoc re-sign: flutter build leaves the main binary and FlutterMacOS.framework
+    # with different Team IDs, and dyld refuses to map the framework in that case
+    # ("code signature ... not valid for use in process").
+    system2(f'codesign --force --deep --sign - "{app_path}"')
+    system2(f'codesign --verify --deep --strict "{app_path}"')
+    if os.environ.get('MINGDESK_MAKE_DMG') == '1':
+        # Disk image with the usual drag-to-install layout. create-dmg is installed
+        # by the workflow; --app-drop-link needs an existing Applications folder
+        # alias, which the tool creates on the mounted volume.
+        dmg_name = f'{installer_stem}-{version}-{mac_arch}'
+        system2(
+            f'create-dmg --volname "{installer_stem} {version}" '
+            f'--window-pos 200 120 --window-size 800 400 --icon-size 100 '
+            f'--app-drop-link 600 185 --icon "{app_path}" 200 190 '
+            f'--hide-extension "{app_path}" '
+            f'"{dmg_name}.dmg" "{app_path}" || true')
+        if os.path.exists(f'{dmg_name}.dmg'):
+            os.rename(f'{dmg_name}.dmg', f'../{dmg_name}.dmg')
+            print(f'output location: {os.path.abspath(os.curdir)}/../{dmg_name}.dmg')
+        else:
+            print('WARNING: create-dmg did not produce a dmg')
     os.chdir("..")
 
 
