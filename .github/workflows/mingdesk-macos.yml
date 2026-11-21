@@ -192,13 +192,14 @@ jobs:
       - name: Collect artifacts
         run: |
           set -euo pipefail
-          ls -la
-          dmg=$(ls ./*.dmg 2>/dev/null | head -1 || true)
+          # build.py leaves the image at the repo root (it moves it out of
+          # flutter/../), so look there first and in the release dir second.
+          dmg=$(ls ./*.dmg flutter/build/macos/Build/Products/Release/*.dmg 2>/dev/null | head -1 || true)
           if [ -n "$dmg" ]; then
             cp "$dmg" "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.dmg"
             du -sh "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.dmg"
           else
-            echo "WARNING: no dmg produced"
+            echo "::warning::no dmg produced, only the zip will be uploaded"
           fi
           cd flutter/build/macos/Build/Products/Release
           ditto -c -k --sequesterRsrc --keepParent MingDesk.app "$GITHUB_WORKSPACE/MingDesk-macos-${{ matrix.arch }}.zip"
@@ -210,3 +211,4 @@ jobs:
           path: |
             MingDesk-macos-${{ matrix.arch }}.dmg
             MingDesk-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error

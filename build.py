@@ -950,7 +950,9 @@ def build_flutter_dmg(version, features):
     mac_arch = 'arm64' if platform.machine().lower() in ('arm64', 'aarch64') else 'x86_64'
     system2(
         f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES flutter build macos --release')
-    app_path = './build/macos/Build/Products/Release/MingDesk.app'
+    release_dir = 'build/macos/Build/Products/Release'
+    app_name = 'MingDesk'
+    app_path = f'./{release_dir}/{app_name}.app'
     system2(f'cp -rf ../target/release/service {app_path}/Contents/MacOS/')
     # Ad-hoc re-sign: flutter build leaves the main binary and FlutterMacOS.framework
     # with different Team IDs, and dyld refuses to map the framework in that case
@@ -958,18 +960,34 @@ def build_flutter_dmg(version, features):
     system2(f'codesign --force --deep --sign - "{app_path}"')
     system2(f'codesign --verify --deep --strict "{app_path}"')
     if os.environ.get('MINGDESK_MAKE_DMG') == '1':
-        # Disk image with the usual drag-to-install layout. create-dmg is installed
-        # by the workflow; --app-drop-link needs an existing Applications folder
-        # alias, which the tool creates on the mounted volume.
+        # Disk image with the usual drag-to-install layout.
+        #
+        # create-dmg's --icon/--hide-extension take the item's NAME INSIDE the
+        # mounted volume, not a path: passing "build/macos/.../MingDesk.app"
+        # makes its Finder AppleScript address a nonexistent item and die with
+        # 'Finder got an error: Can't set item ... (-10006)'. The volume is
+        # built from the release dir, so the app is simply "MingDesk.app".
+        # The AppleScript beautification also needs a GUI session, which a CI
+        # runner may lack, so it is allowed to fail: create-dmg keeps the image
+        # it already produced and only the icon layout is lost.
         dmg_name = f'{installer_stem}-{version}-{mac_arch}'
         system2(
             f'create-dmg --volname "{installer_stem} {version}" '
             f'--window-pos 200 120 --window-size 800 400 --icon-size 100 '
-            f'--app-drop-link 600 185 --icon "{app_path}" 200 190 '
-            f'--hide-extension "{app_path}" '
-            f'"{dmg_name}.dmg" "{app_path}" || true')
+            f'--app-drop-link 600 185 --icon "{app_name}.app" 200 190 '
+            f'--hide-extension "{app_name}.app" '
+            f'"{dmg_name}.dmg" "{release_dir}" || true')
+        # create-dmg may leave the image behind without renaming it to our
+        # requested name (and it prints a random rw.*.dmg while working), so
+        # fall back to whatever image it actually left in the release dir.
+        if not os.path.exists(f'{dmg_name}.dmg'):
+            import glob as _glob
+            leftovers = sorted(_glob.glob(os.path.join(release_dir, '*.dmg')))
+            if leftovers:
+                os.replace(leftovers[-1], f'{dmg_name}.dmg')
+                print(f'create-dmg left {leftovers[-1]}, adopted it')
         if os.path.exists(f'{dmg_name}.dmg'):
-            os.rename(f'{dmg_name}.dmg', f'../{dmg_name}.dmg')
+            os.replace(f'{dmg_name}.dmg', f'../{dmg_name}.dmg')
             print(f'output location: {os.path.abspath(os.curdir)}/../{dmg_name}.dmg')
         else:
             print('WARNING: create-dmg did not produce a dmg')
