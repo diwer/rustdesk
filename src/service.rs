@@ -6,6 +6,13 @@ fn main() {}
 #[cfg(target_os = "macos")]
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // global_init seeds the baked-in server/relay/key defaults. The root service
+    // process needs them too: it writes plists and answers IPC option queries,
+    // and without this it would fall back to the public network's key.
+    if !crate::common::global_init() {
+        eprintln!("Global initialization failed.");
+        return;
+    }
     crate::common::load_custom_client();
     if args.len() > 1 && args[1] == "--write-plists" {
         if let Err(e) = librustdesk::platform::write_plists() {

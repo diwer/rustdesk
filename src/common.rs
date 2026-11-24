@@ -63,6 +63,16 @@ pub const PORTABLE_APPNAME_RUNTIME_ENV_KEY: &str = "RUSTDESK_APPNAME";
 pub const BAKED_RENDEZVOUS_SERVER: &str = "192.168.3.130";
 pub const BAKED_RELAY_SERVER: &str = "192.168.3.130";
 
+/// The server's own public key (`id_ed25519.pub` on the host running hbbs).
+///
+/// Required, not optional: hbbs verifies every client request against this key
+/// and answers `Authentication failed ... invalid key` otherwise, which the
+/// client surfaces as "Key mismatch" when it tries to connect to a peer. The
+/// server here was started without `-k`, so it enforces the key pair it
+/// generated on first run — clients that leave the `key` option empty fall back
+/// to `RS_PUB_KEY` (the public RustDesk network's key) and fail.
+pub const BAKED_SERVER_PUB_KEY: &str = "+P+lrv6KhPcXOTQsfitarkbrb+YIPbrHsIvicup2UhI=";
+
 pub const PLATFORM_WINDOWS: &str = "Windows";
 pub const PLATFORM_LINUX: &str = "Linux";
 pub const PLATFORM_MACOS: &str = "Mac OS";
@@ -160,13 +170,17 @@ pub fn global_init() -> bool {
 /// is seeded here. Runs before the server processes start, so the first
 /// registration already uses it.
 fn seed_baked_in_server() {
-    if BAKED_RENDEZVOUS_SERVER.is_empty() && BAKED_RELAY_SERVER.is_empty() {
+    if BAKED_RENDEZVOUS_SERVER.is_empty()
+        && BAKED_RELAY_SERVER.is_empty()
+        && BAKED_SERVER_PUB_KEY.is_empty()
+    {
         return;
     }
     let mut defaults = config::DEFAULT_SETTINGS.write().unwrap();
     for (key, value) in [
         ("custom-rendezvous-server", BAKED_RENDEZVOUS_SERVER),
         ("relay-server", BAKED_RELAY_SERVER),
+        ("key", BAKED_SERVER_PUB_KEY),
     ] {
         if value.is_empty() {
             continue;
