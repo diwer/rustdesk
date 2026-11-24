@@ -24,7 +24,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { flutter: "3.22.3", artifact: "bridge-artifact" }
+          # 3.22.3 used to generate the x86_64 slice's bridge; that slice is gone.
           - { flutter: "3.44.8", artifact: "bridge-artifact-flutter-3.44" }
     steps:
       - uses: actions/checkout@v4
@@ -80,24 +80,19 @@ jobs:
             ./flutter/ios/Runner/bridge_generated.h
 
   build:
-    name: macOS ${{ matrix.arch }}
+    name: macOS arm64
     needs: [bridge]
-    # Probed on this fork: macos-13/macos-14 are never acquired, macos-26 is
-    # cancelled for capacity. macos-15 (arm64) and macos-15-intel (x86_64) are
-    # the only labels that allocate, and even those are best-effort, so this is
-    # a matrix with fail-fast disabled: the x86_64 slice (runs on Apple Silicon
-    # via Rosetta) is the guaranteed deliverable.
+    # Apple Silicon only. The x86_64 slice is deliberately gone: Intel binaries
+    # trigger macOS's "will not open in the next major version" notice (Rosetta 2
+    # is removed in macOS 28) and every machine we target is Apple Silicon.
+    #
+    # Probed on this fork: macos-13/macos-14 are never acquired and macos-26 is
+    # cancelled for capacity; macos-15 is the only label that allocates an arm64
+    # runner, and even that is best-effort, so it is retried rather than trusted.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: x86_64
-            os: macos-15-intel
-            target: x86_64-apple-darwin
-            flutter: "3.24.5"
-            bridge: bridge-artifact
-            extra: ""
-            triplet: x64-osx
           - arch: arm64
             os: macos-15
             target: aarch64-apple-darwin
@@ -136,11 +131,9 @@ jobs:
           flutter-version: ${{ matrix.flutter }}
 
       - name: Configure flutter
-        if: ${{ matrix.arch == 'arm64' }}
         run: flutter config --no-enable-swift-package-manager
 
       - name: Patch RustDesk sources for Flutter 3.44
-        if: ${{ matrix.arch == 'arm64' }}
         shell: bash
         run: |
           export PATH="$(brew --prefix gnu-sed)/libexec/gnubin:$PATH"
@@ -174,7 +167,6 @@ jobs:
         run: |
           set -euo pipefail
           MIN_MACOS_VERSION="12.3"
-          if [ "${{ matrix.arch }}" = "x86_64" ]; then MIN_MACOS_VERSION="10.15"; fi
           sed -i '' -e "s/MACOSX_DEPLOYMENT_TARGET=[0-9]*\.[0-9]*/MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}/" build.py
           sed -i '' -e "s/platform :osx, '.*'/platform :osx, '${MIN_MACOS_VERSION}'/" flutter/macos/Podfile
           sed -i '' -e "s/osx_minimum_system_version = \"[0-9]*\.[0-9]*\"/osx_minimum_system_version = \"${MIN_MACOS_VERSION}\"/" Cargo.toml
@@ -188,6 +180,10 @@ jobs:
           cd flutter/build/macos/Build/Products/Release
           codesign --verify --deep --strict --verbose=2 MingDesk.app
           MingDesk.app/Contents/MacOS/MingDesk --version
+          # Fail loudly if the toolchain produced an Intel binary: that is the
+          # build we just stopped shipping.
+          file MingDesk.app/Contents/MacOS/MingDesk
+          file MingDesk.app/Contents/MacOS/MingDesk | grep -q arm64
 
       - name: Collect artifacts
         run: |
