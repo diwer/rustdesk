@@ -220,12 +220,29 @@ pub fn install_service() -> bool {
     is_installed_daemon(false)
 }
 
+/// Base name of this app's launchd plists and labels, e.g. `com.carriez.MingDesk`.
+///
+/// `write_plists()` has always hardcoded the `com.carriez.` prefix followed by
+/// the app name, while the "is the service installed?" checks used
+/// `ORG.APP_NAME` (`get_full_name()`). For a custom client those two disagree —
+/// `com.mingdesk.MingDesk` vs `com.carriez.MingDesk` — so the home page kept
+/// showing "install the system service" even after the service was installed and
+/// running, because it looked for a plist that was never written.
+///
+/// Both sides now go through this one helper so the name cannot drift again.
+/// The `com.carriez.` prefix is upstream's namespace and is deliberately kept:
+/// launchd labels are internal, and changing them would orphan the plists that
+/// existing installs already have on disk.
+pub fn launchd_base_name() -> String {
+    format!("com.carriez.{}", crate::get_app_name())
+}
+
 // Remember to check if `update_daemon_agent()` need to be changed if changing `is_installed_daemon()`.
 // No need to merge the existing dup code, because the code in these two functions are too critical.
 // New code should be written in a common function.
 pub fn is_installed_daemon(prompt: bool) -> bool {
-    let daemon = format!("{}_service.plist", crate::get_full_name());
-    let agent = format!("{}_server.plist", crate::get_full_name());
+    let daemon = format!("{}_service.plist", launchd_base_name());
+    let agent = format!("{}_server.plist", launchd_base_name());
     let agent_plist_file = format!("/Library/LaunchAgents/{}", agent);
     if !prompt {
         // in macos 13, there is new way to check if they are running or enabled, https://developer.apple.com/documentation/servicemanagement/updating-helper-executables-from-earlier-versions-of-macos#Respond-to-changes-in-System-Settings
@@ -396,12 +413,12 @@ fn write_plist_atomically(path: &str, body: &str) -> ResultType<()> {
 
 pub fn write_plists() -> ResultType<()> {
     let daemon_plist_path = format!(
-        "/Library/LaunchDaemons/com.carriez.{}_service.plist",
-        crate::get_app_name()
+        "/Library/LaunchDaemons/{}_service.plist",
+        launchd_base_name()
     );
     let agent_plist_path = format!(
-        "/Library/LaunchAgents/com.carriez.{}_server.plist",
-        crate::get_app_name()
+        "/Library/LaunchAgents/{}_server.plist",
+        launchd_base_name()
     );
     let Some(daemon_plist) = PRIVILEGES_SCRIPTS_DIR.get_file("daemon.plist") else {
         bail!("daemon.plist not found in embedded resources");
@@ -444,7 +461,7 @@ pub fn uninstall_service(show_new_window: bool, sync: bool) -> bool {
                 log::error!("run osascript failed: {}", e);
             }
             _ => {
-                let agent = format!("{}_server.plist", crate::get_full_name());
+                let agent = format!("{}_server.plist", launchd_base_name());
                 let agent_plist_file = format!("/Library/LaunchAgents/{}", agent);
                 let uninstalled = !std::path::Path::new(&agent_plist_file).exists();
                 log::info!(
@@ -460,7 +477,7 @@ pub fn uninstall_service(show_new_window: bool, sync: bool) -> bool {
                     }
                     crate::ipc::set_option("stop-service", "Y");
                     std::process::Command::new("launchctl")
-                        .args(&["remove", &format!("{}_server", crate::get_full_name())])
+                        .args(&["remove", &format!("{}_server", launchd_base_name())])
                         .status()
                         .ok();
                     if show_new_window {
@@ -976,7 +993,7 @@ fn update_me_from_source(update_source: UpdateSource) -> ResultType<()> {
 
     // Include launchd jobs in the transaction only while the installed service is enabled.
     if is_installed_daemon && !is_service_stopped {
-        let agent = format!("{}_server.plist", crate::get_full_name());
+        let agent = format!("{}_server.plist", launchd_base_name());
         let agent_plist_file = format!("/Library/LaunchAgents/{}", agent);
         update_daemon_agent(agent_plist_file, update_source)?;
     } else {

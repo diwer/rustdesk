@@ -60,3 +60,6 @@ flutter/web/
 /third_party/libdrmtap/
 # Local git worktrees
 .worktrees/
+
+# local build outputs (deliverables live on the NAS)
+/dist/
