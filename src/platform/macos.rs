@@ -155,7 +155,7 @@ pub fn is_can_screen_recording(prompt: bool) -> bool {
 
 // macOS >= 10.15
 // https://stackoverflow.com/questions/56597221/detecting-screen-recording-settings-on-macos-catalina/
-// remove just one app from all the permissions: tccutil reset All com.carriez.rustdesk
+// remove just one app from all the permissions: tccutil reset All com.mingdesk.desktop
 fn unsafe_is_can_screen_recording(prompt: bool) -> bool {
     // we got some report that we show no permission even after set it, so we try to use new api for screen recording check
     // the new api is only available on macOS >= 10.15, but on stackoverflow, some people said it works on >= 10.16 (crash on 10.15),
@@ -220,21 +220,44 @@ pub fn install_service() -> bool {
     is_installed_daemon(false)
 }
 
-/// Base name of this app's launchd plists and labels, e.g. `com.carriez.MingDesk`.
+/// Base name of this app's launchd plists and labels, e.g. `com.mingdesk.MingDesk`.
 ///
-/// `write_plists()` has always hardcoded the `com.carriez.` prefix followed by
-/// the app name, while the "is the service installed?" checks used
-/// `ORG.APP_NAME` (`get_full_name()`). For a custom client those two disagree —
-/// `com.mingdesk.MingDesk` vs `com.carriez.MingDesk` — so the home page kept
-/// showing "install the system service" even after the service was installed and
-/// running, because it looked for a plist that was never written.
+/// Everything launchd-related is derived from `ORG.APP_NAME` so the whole bundle
+/// is branded consistently: the config directory, the TCC bundle identifier and
+/// now the service plists all say `com.mingdesk`.
 ///
-/// Both sides now go through this one helper so the name cannot drift again.
-/// The `com.carriez.` prefix is upstream's namespace and is deliberately kept:
-/// launchd labels are internal, and changing them would orphan the plists that
-/// existing installs already have on disk.
+/// This used to be hardcoded to `com.carriez.<AppName>` in `write_plists()` while
+/// `is_installed_daemon()` looked for `ORG.APP_NAME`. For the stock client both
+/// happened to be `com.carriez.RustDesk`, hiding the mismatch; with a custom ORG
+/// they disagreed, so the home page kept asking to install a service that was
+/// already installed. Every site now goes through this helper.
 pub fn launchd_base_name() -> String {
-    format!("com.carriez.{}", crate::get_app_name())
+    crate::get_full_name()
+}
+
+/// Remove service plists written by builds that still used the `com.carriez.`
+/// prefix, so an upgrade does not end up with two services running under two
+/// different labels.
+pub fn remove_legacy_plists() {
+    let base = format!("com.carriez.{}", crate::get_app_name());
+    for (dir, suffix) in [
+        ("/Library/LaunchDaemons", "service"),
+        ("/Library/LaunchAgents", "server"),
+    ] {
+        let path = format!("{dir}/{base}_{suffix}.plist");
+        if !std::path::Path::new(&path).exists() {
+            continue;
+        }
+        // Unload before deleting: a plist that is gone but still loaded keeps its
+        // job alive until reboot.
+        let _ = std::process::Command::new("launchctl")
+            .args(["unload", "-w", &path])
+            .status();
+        match std::fs::remove_file(&path) {
+            Ok(_) => log::info!("removed legacy plist {}", path),
+            Err(e) => log::error!("failed to remove legacy plist {}: {}", path, e),
+        }
+    }
 }
 
 // Remember to check if `update_daemon_agent()` need to be changed if changing `is_installed_daemon()`.
@@ -381,6 +404,10 @@ fn update_daemon_agent(agent_plist_file: String, update_source: UpdateSource) ->
 
 fn correct_app_name(s: &str) -> String {
     let mut s = s.to_owned();
+    // Rewrite the whole upstream namespace before the bare-name substitutions
+    // below, otherwise "com.carriez.RustDesk_server" would become
+    // "com.carriez.MingDesk_server" and keep the com.carriez prefix.
+    s = s.replace("com.carriez.RustDesk", &launchd_base_name());
     if let Some(bundleid) = get_bundle_id() {
         s = s.replace("com.carriez.rustdesk", &bundleid);
     }
@@ -412,6 +439,9 @@ fn write_plist_atomically(path: &str, body: &str) -> ResultType<()> {
 }
 
 pub fn write_plists() -> ResultType<()> {
+    // Drop plists left by pre-rename builds before writing ours, or the machine
+    // ends up with two services (com.carriez.MingDesk_* and com.mingdesk.MingDesk_*).
+    remove_legacy_plists();
     let daemon_plist_path = format!(
         "/Library/LaunchDaemons/{}_service.plist",
         launchd_base_name()
@@ -1243,8 +1273,8 @@ pub fn update_from_dmg_as_root(dmg_path: &str, expected_version: &str) -> Result
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&tmp_dir, std::fs::Permissions::from_mode(0o700))?;
     }
-    let agent_plist = format!("/Library/LaunchAgents/com.carriez.{}_server.plist", app_name);
-    let daemon_plist = format!("/Library/LaunchDaemons/com.carriez.{}_service.plist", app_name);
+    let agent_plist = format!("/Library/LaunchAgents/{}_server.plist", launchd_base_name());
+    let daemon_plist = format!("/Library/LaunchDaemons/{}_service.plist", launchd_base_name());
 
     log::info!("[root-update] Starting silent root update from {}", dmg_path);
     // Check sessions before extracting to avoid unnecessary work
@@ -1376,8 +1406,8 @@ pub fn update_from_dmg_as_root(dmg_path: &str, expected_version: &str) -> Result
     // Write a shell script that runs detached after this function returns.
     // We cannot directly replace /Applications/RustDesk.app while it is running,
     // so we spawn a script that waits, kills processes, copies, and restarts.
-    let daemon_label = format!("com.carriez.{}_service", app_name);
-    let agent_label = format!("com.carriez.{}_server", app_name);
+    let daemon_label = format!("{}_service", launchd_base_name());
+    let agent_label = format!("{}_server", launchd_base_name());
     let script_path = format!("{}/rustdesk_update.sh", tmp_dir);
     let script = format!(
         r#"#!/bin/sh
